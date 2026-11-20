@@ -11,6 +11,8 @@ namespace MDWMBlurGlassExt::BackdropFactory
 	);
 	std::chrono::steady_clock::time_point GetBackdropBrushTimeStamp();
 
+	wuc::CompositionBrush GetOrCreateFeatherMaskBrush(const wuc::Compositor& compositor);
+
 	void Shutdown();
 
 	void RefreshConfig();

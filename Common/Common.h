@@ -1,4 +1,4 @@
-﻿/**
+/**
  * FileName: Common.h
  *
  * Copyright (C) 2024 Maplespe
@@ -58,6 +58,9 @@ namespace MDWMBlurGlass
 		bool titlebtnGlow = false;
 
 		bool disableFramerateLimit = false;
+
+		bool whitelistMode = false;
+		wchar_t whitelist[1024] = { 0 };
 
 		//Options without GUI
 		int extendRound = 10;

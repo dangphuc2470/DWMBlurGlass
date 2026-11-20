@@ -1,4 +1,4 @@
-﻿/**
+/**
  * FileName: Common.cpp
  *
  * Copyright (C) 2024 Maplespe
@@ -111,6 +111,12 @@ namespace MDWMBlurGlass
 		cfgData.disableOnBattery = GetConfigBool(L"disableOnBattery", true);
 		cfgData.titlebtnGlow = GetConfigBool(L"titlebtnGlow");
 		cfgData.disableFramerateLimit = GetConfigBool(L"disableFramerateLimit");
+		cfgData.whitelistMode = GetConfigBool(L"whitelistMode");
+
+		GetCfgValueInternal(L"whitelist",
+		{
+			wcsncpy_s(cfgData.whitelist, value.c_str(), _countof(cfgData.whitelist) - 1);
+		});
 
 		GetCfgValueInternal(L"extendRound",
 		{
@@ -269,7 +275,9 @@ namespace MDWMBlurGlass
 				{ L"occlusionCulling", make_wstring(cfg.scaleOptimizer) },
 				{ L"disableOnBattery", make_wstring(cfg.disableOnBattery) },
 				{ L"titlebtnGlow", make_wstring(cfg.titlebtnGlow) },
-				{ L"disableFramerateLimit", make_wstring(cfg.disableFramerateLimit) }
+				{ L"disableFramerateLimit", make_wstring(cfg.disableFramerateLimit) },
+				{ L"whitelistMode", make_wstring(cfg.whitelistMode) },
+				{ L"whitelist", cfg.whitelist }
 				}); const auto & [key, value] : regkeyList)
 		{
 			Utils::SetIniString(path, L"config", key, value);

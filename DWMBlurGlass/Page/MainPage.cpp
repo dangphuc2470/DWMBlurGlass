@@ -1,4 +1,4 @@
-﻿/**
+/**
  * FileName: MainPage.cpp
  *
  * Copyright (C) 2024 Maplespe
@@ -212,6 +212,22 @@ namespace MDWMBlurGlass
                 <UILabel pos="0,5" name="langauthor" />
         		<UILabel frame="0,15,10f,20" text="Copyright © 2023-2025 Maplespe" autoSize="false" textAlign="2" hyperlink="true" url="https://github.com/Maplespe/" />
             </UIControl>
+        </UIControl>
+        <UIControl frame="0,95,485,100%" name="page5" visible="false" align="LinearV">
+            <UIControl frame="15,5,15f,210" align="LinearV" prop="group">
+                <UIControl autoSize="true">
+                    <UIImgBox frame="0,0,18,18" autoSize="false" img="icon_control" />
+                    <UILabel pos="10,2" text="App Whitelist (Chỉ làm mờ ứng dụng được chọn)" />
+                </UIControl>
+                <UICheckBox pos="0,12" text="Bật Whitelist (Chỉ làm mờ các app trong danh sách)" name="whitelistMode" />
+                <UILabel pos="0,10" text="Danh sách file exe (phân cách bằng dấu chấm phẩy ';' hoặc dấu phẩy ','):" fontColor="150,150,150,255" />
+                <UIEditBox frame="0,6,450,26" name="whitelistEdit" text="" inset="5,3,5,3" />
+                <UIControl frame="0,12,100,100" autoSize="true">
+                    <UIButton pos="0,0" name="addAppBtn" text="Thêm file .exe..." autoSize="true" minSize="110,26" maxSize="160,26" inset="5,2,5,2" />
+                    <UIButton pos="10,0" name="clearAppBtn" text="Xóa hết" autoSize="true" minSize="80,26" maxSize="100,26" inset="5,2,5,2" />
+                </UIControl>
+                <UILabel pos="0,10" text="Ví dụ: seelen-ui.exe; notepad.exe; WindowsTerminal.exe" fontColor="150,150,150,255" />
+            </UIControl>
         </UIControl>);
         
 		if(!ui->CreateUIFromXML(parent, xml))
@@ -223,6 +239,8 @@ namespace MDWMBlurGlass
 		navbar->AddItem(ui->GetStringValue(L"symbol"));
 		navbar->AddItem(ui->GetStringValue(L"config"));
 		navbar->AddItem(ui->GetStringValue(L"about"));
+		auto appsTitle = ui->GetStringValue(L"apps");
+		navbar->AddItem(appsTitle.empty() ? L"Apps" : appsTitle);
 
         navbar = parent->Child<UINavBar>(L"cmodenavbar");
         navbar->AddItem(ui->GetStringValue(L"cmodelight"));
@@ -436,6 +454,40 @@ namespace MDWMBlurGlass
                     m_cfgData.applyglobal = static_cast<UICheckBox*>(control)->GetSel();
                     SetButtonEnable(true);
                 }
+                else if (_MNAME(L"whitelistMode"))
+                {
+                    m_cfgData.whitelistMode = static_cast<UICheckBox*>(control)->GetSel();
+                    SetButtonEnable(true);
+                }
+                else if (_MNAME(L"addAppBtn"))
+                {
+                    std::vector<std::wstring> seledFile;
+                    bool isOpen = BrowseForFile(true, false, { { L"Executable", L"*.exe" } }, hWnd, seledFile);
+                    if (isOpen && !seledFile.empty())
+                    {
+                        WCHAR* fileName = PathFindFileNameW(seledFile[0].c_str());
+                        auto edit = m_page->Child<UIEditBox>(L"whitelistEdit");
+                        std::wstring currentText = edit ? edit->GetCurText() : L"";
+                        if (!currentText.empty())
+                        {
+                            if (currentText.back() != L';' && currentText.back() != L',')
+                                currentText += L"; ";
+                            else if (currentText.back() == L';' || currentText.back() == L',')
+                                currentText += L" ";
+                        }
+                        currentText += fileName;
+                        if (edit) edit->SetCurText(currentText);
+                        wcsncpy_s(m_cfgData.whitelist, currentText.c_str(), _countof(m_cfgData.whitelist) - 1);
+                        SetButtonEnable(true);
+                    }
+                }
+                else if (_MNAME(L"clearAppBtn"))
+                {
+                    auto edit = m_page->Child<UIEditBox>(L"whitelistEdit");
+                    if (edit) edit->SetCurText(L"");
+                    memset(m_cfgData.whitelist, 0, sizeof(m_cfgData.whitelist));
+                    SetButtonEnable(true);
+                }
                 else if (_MNAME(L"extendBorder"))
                 {
                     m_cfgData.extendBorder = static_cast<UICheckBox*>(control)->GetSel();
@@ -643,6 +695,12 @@ namespace MDWMBlurGlass
                 m_cfgData.crossfadeTime = _wtoi(edit->GetCurText().data());
                 SetButtonEnable(true);
             }
+            else if (_MNAME(L"whitelistEdit"))
+            {
+                auto edit = static_cast<UIEditBox*>(control);
+                wcsncpy_s(m_cfgData.whitelist, edit->GetCurText().c_str(), _countof(m_cfgData.whitelist) - 1);
+                SetButtonEnable(true);
+            }
             else
                 ret = false;
         }
@@ -818,11 +876,21 @@ namespace MDWMBlurGlass
         m_page->Child<UICheckBox>(L"disableFramerateLimit")->SetSel(m_cfgData.disableFramerateLimit, false);
         m_page->Child<UIEditBox>(L"crossfadeTimeValue")->SetCurText(std::to_wstring(m_cfgData.crossfadeTime));
 
+        auto whitelistChk = m_page->Child<UICheckBox>(L"whitelistMode");
+        if (whitelistChk) whitelistChk->SetSel(m_cfgData.whitelistMode, false);
+        auto whitelistEdit = m_page->Child<UIEditBox>(L"whitelistEdit");
+        if (whitelistEdit) whitelistEdit->SetCurText(m_cfgData.whitelist);
+
         m_page->UpdateLayout();
     }
 
     void MainWindowPage::SaveConfig(std::wstring_view path)
     {
+        auto whitelistEdit = m_page->Child<UIEditBox>(L"whitelistEdit");
+        if (whitelistEdit)
+        {
+            wcsncpy_s(m_cfgData.whitelist, whitelistEdit->GetCurText().c_str(), _countof(m_cfgData.whitelist) - 1);
+        }
         ConfigData::SaveToFile(path, m_cfgData);
     }
 

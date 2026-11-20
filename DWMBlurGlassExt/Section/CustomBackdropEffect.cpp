@@ -1,4 +1,4 @@
-﻿/**
+/**
  * FileName: CustomBackdropEffect.cpp
  *
  * Copyright (C) 2024 ALTaleX531, Maplespe
@@ -23,6 +23,11 @@
 #include "wil.h"
 #include "CommonDef.h"
 
+#include <algorithm>
+#include <TlHelp32.h>
+#include <unordered_map>
+#include <mutex>
+
 namespace MDWMBlurGlassExt::CustomBackdrop
 {
 	using namespace CommonDef;
@@ -38,11 +43,143 @@ namespace MDWMBlurGlassExt::CustomBackdrop
 
 	ULONGLONG g_oldBackdropBlurCachingThrottleQPCTimeDelta{ 0ull };
 
+	inline std::wstring GetProcessNameFromPid(DWORD pid)
+	{
+		if (!pid) return L"";
+
+		static std::unordered_map<DWORD, std::wstring> pidCache;
+		static std::mutex cacheMutex;
+
+		{
+			std::lock_guard lock(cacheMutex);
+			auto it = pidCache.find(pid);
+			if (it != pidCache.end())
+				return it->second;
+		}
+
+		// Method 1: CreateToolhelp32Snapshot - works in DWM without OpenProcess privilege issues
+		HANDLE hSnap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+		if (hSnap != INVALID_HANDLE_VALUE)
+		{
+			PROCESSENTRY32W pe = { sizeof(PROCESSENTRY32W) };
+			if (Process32FirstW(hSnap, &pe))
+			{
+				std::lock_guard lock(cacheMutex);
+				do
+				{
+					pidCache[pe.th32ProcessID] = pe.szExeFile;
+				} while (Process32NextW(hSnap, &pe));
+			}
+			CloseHandle(hSnap);
+
+			std::lock_guard lock(cacheMutex);
+			auto it = pidCache.find(pid);
+			if (it != pidCache.end())
+				return it->second;
+		}
+
+		// Method 2: OpenProcess fallback
+		HANDLE hProc = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
+		if (hProc)
+		{
+			WCHAR fullPath[MAX_PATH] = { 0 };
+			DWORD size = MAX_PATH;
+			if (QueryFullProcessImageNameW(hProc, 0, fullPath, &size))
+			{
+				CloseHandle(hProc);
+				std::wstring path(fullPath);
+				size_t pos = path.rfind(L'\\');
+				std::wstring name = (pos != std::wstring::npos) ? path.substr(pos + 1) : path;
+				std::lock_guard lock(cacheMutex);
+				pidCache[pid] = name;
+				return name;
+			}
+			CloseHandle(hProc);
+		}
+
+		return L"";
+	}
+
+	inline bool IsWindowAllowedByWhitelist(HWND hwnd, const wchar_t* whitelist)
+	{
+		if (!hwnd || !whitelist || !*whitelist) return false;
+
+		DWORD pid = 0;
+		GetWindowThreadProcessId(hwnd, &pid);
+		std::wstring exeName = GetProcessNameFromPid(pid);
+
+		WCHAR className[256] = { 0 };
+		GetClassNameW(hwnd, className, 256);
+
+		WCHAR title[256] = { 0 };
+		GetWindowTextW(hwnd, title, 256);
+
+		auto ToLower = [](std::wstring s) {
+			std::transform(s.begin(), s.end(), s.begin(), ::towlower);
+			return s;
+		};
+
+		std::wstring exeLower = ToLower(exeName);
+		std::wstring classLower = ToLower(className);
+		std::wstring titleLower = ToLower(title);
+		std::wstring wlLower = ToLower(whitelist);
+
+		std::wstring exeBaseLower = exeLower;
+		if (exeBaseLower.size() > 4 && exeBaseLower.substr(exeBaseLower.size() - 4) == L".exe")
+			exeBaseLower = exeBaseLower.substr(0, exeBaseLower.size() - 4);
+
+		size_t start = 0;
+		while (start < wlLower.size())
+		{
+			size_t end = wlLower.find_first_of(L";,\r\n", start);
+			if (end == std::wstring::npos) end = wlLower.size();
+
+			if (end > start)
+			{
+				std::wstring item = wlLower.substr(start, end - start);
+				item.erase(0, item.find_first_not_of(L" \t"));
+				auto last = item.find_last_not_of(L" \t");
+				if (last != std::wstring::npos)
+					item.erase(last + 1);
+
+				if (!item.empty())
+				{
+					std::wstring itemBase = item;
+					if (itemBase.size() > 4 && itemBase.substr(itemBase.size() - 4) == L".exe")
+						itemBase = itemBase.substr(0, itemBase.size() - 4);
+
+					if (!exeLower.empty() && (exeLower == item || exeBaseLower == itemBase))
+						return true;
+					if (!classLower.empty() && (classLower == item || classLower == itemBase))
+						return true;
+					if (!titleLower.empty() && titleLower.find(itemBase) != std::wstring::npos)
+						return true;
+				}
+			}
+			start = end + 1;
+		}
+		return false;
+	}
+
 	FORCEINLINE bool IsBackdropAllowed(CTopLevelWindow* This)
 	{
 		if (g_configData.powerSavingMode && g_configData.disableOnBattery)
 		{
 			return false;
+		}
+
+		if (This && g_configData.whitelistMode)
+		{
+			auto data = This->GetData();
+			HWND hwnd = data ? data->GetHWND() : nullptr;
+			if (hwnd)
+			{
+				if (!IsWindowAllowedByWhitelist(hwnd, g_configData.whitelist))
+				{
+					CVisualManager::Trim(This);
+					return false;
+				}
+			}
 		}
 
 		if (This && GetActualBackdropKind(This) == CompositedBackdropKind::SystemBackdrop && !g_configData.applyglobal)

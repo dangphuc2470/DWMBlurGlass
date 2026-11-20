@@ -1,4 +1,4 @@
-﻿#include "../Backdrops/DCompBackdrop.hpp"
+#include "../Backdrops/DCompBackdrop.hpp"
 #include "../Backdrops/BackdropFactory.hpp"
 #include "CustomBackdropEffect.h"
 #include "VersionHelper.h"
@@ -257,7 +257,7 @@ namespace MDWMBlurGlassExt
 					auto handler = [strongThis](auto sender, auto args)
 						{
 							strongThis->CancelAnimationCompleteWait();
-							strongThis->m_spriteVisual.Brush(strongThis->m_backdropBrush);
+							strongThis->ApplyFinalBrush(strongThis->m_backdropBrush);
 						};
 
 					crossfadeBrush.StartAnimation(L"Crossfade.Weight", CreateCrossFadeAnimation(compositor,
@@ -273,13 +273,41 @@ namespace MDWMBlurGlassExt
 					1, crossfadeTime));
 			}
 
-			m_spriteVisual.Brush(crossfadeBrush);
+			ApplyFinalBrush(crossfadeBrush);
 		}
 		else
 		{
-			m_spriteVisual.Brush(m_backdropBrush);
+			ApplyFinalBrush(m_backdropBrush);
 		}
 		m_previousBackdropBrush = m_backdropBrush;
+	}
+
+		void CCompositedBackdropVisual::ApplyFinalBrush(wuc::CompositionBrush const& brush)
+	{
+		if (!brush)
+		{
+			m_spriteVisual.Brush(nullptr);
+			return;
+		}
+
+		try
+		{
+			HWND hwnd{ m_data ? m_data->GetHWND() : nullptr };
+			if (!hwnd || !GetPropW(hwnd, L"SeelenFeatherBlur"))
+			{
+				m_spriteVisual.Brush(brush);
+				return;
+			}
+			auto compositor{ brush.Compositor() };
+			auto maskBrush{ compositor.CreateMaskBrush() };
+			maskBrush.Source(brush);
+			maskBrush.Mask(BackdropFactory::GetOrCreateFeatherMaskBrush(compositor));
+			m_spriteVisual.Brush(maskBrush);
+		}
+		catch (...)
+		{
+			m_spriteVisual.Brush(brush);
+		}
 	}
 
 	void CCompositedBackdropVisual::CancelAnimationCompleteWait()

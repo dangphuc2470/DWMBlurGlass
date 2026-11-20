@@ -1,6 +1,9 @@
-﻿#include "BackdropFactory.hpp"
+#include "BackdropFactory.hpp"
 #include "DcompBackdrop.hpp"
 #include <Shlwapi.h>
+#include <cmath>
+#include <vector>
+#include <algorithm>
 
 #include "AeroBackdrop.hpp"
 #include "BlurBackdrop.hpp"
@@ -12,6 +15,7 @@ namespace MDWMBlurGlassExt
 	effectType g_type{ effectType::Blur };
 
 	wuc::CompositionSurfaceBrush g_materialTextureBrush{ nullptr };
+	wuc::CompositionBrush g_featherMaskBrush{ nullptr };
 	std::chrono::steady_clock::time_point g_currentTimeStamp{};
 	std::unordered_map<DWORD, wuc::CompositionBrush> g_backdropActiveBrushMap{};
 	std::unordered_map<DWORD, wuc::CompositionBrush> g_backdropInactiveBrushMap{};
@@ -247,11 +251,94 @@ namespace MDWMBlurGlassExt
 		return g_currentTimeStamp;
 	}
 
+	
+	wuc::CompositionBrush BackdropFactory::GetOrCreateFeatherMaskBrush(const wuc::Compositor& compositor)
+	{
+		if (g_featherMaskBrush)
+			return g_featherMaskBrush;
+
+		com_ptr<DCompPrivate::IDCompositionDesktopDevicePartner> dcompDevice{ nullptr };
+		copy_from_abi(dcompDevice, DWM::CDesktopManager::s_pDesktopManagerInstance->GetDCompositionInteropDevice());
+		auto factoryCompositor{ dcompDevice.as<wuc::Compositor>() };
+
+		wuc::CompositionGraphicsDevice graphicsDevice{ nullptr };
+		THROW_IF_FAILED(
+			factoryCompositor.as<ABI::Windows::UI::Composition::ICompositorInterop>()->CreateGraphicsDevice(
+				DWM::CDesktopManager::s_pDesktopManagerInstance->GetD2DDevice(),
+				reinterpret_cast<ABI::Windows::UI::Composition::ICompositionGraphicsDevice**>(winrt::put_abi(graphicsDevice))
+			)
+		);
+
+		constexpr UINT texSize = 129;
+		constexpr float half = 64.0f;
+
+		auto surface{
+			graphicsDevice.CreateDrawingSurface(
+				{ static_cast<float>(texSize), static_cast<float>(texSize) },
+				wgd::DirectXPixelFormat::B8G8R8A8UIntNormalized,
+				wgd::DirectXAlphaMode::Premultiplied
+			)
+		};
+
+		std::vector<uint8_t> pixels(texSize * texSize * 4);
+		for (UINT y = 0; y < texSize; ++y)
+		{
+			for (UINT x = 0; x < texSize; ++x)
+			{
+				float dx = static_cast<float>(x) - half;
+				float dy = static_cast<float>(y) - half;
+				float dist = std::sqrt(dx * dx + dy * dy);
+				float t = std::clamp(dist / half, 0.0f, 1.0f);
+				float factor = 1.0f - (t * t * (3.0f - 2.0f * t));
+				uint8_t a = static_cast<uint8_t>(std::clamp(factor * 255.0f + 0.5f, 0.0f, 255.0f));
+				size_t idx = (static_cast<size_t>(y) * texSize + x) * 4;
+				pixels[idx + 0] = a;
+				pixels[idx + 1] = a;
+				pixels[idx + 2] = a;
+				pixels[idx + 3] = a;
+			}
+		}
+
+		auto drawingSurfaceInterop{ surface.as<ABI::Windows::UI::Composition::ICompositionDrawingSurfaceInterop>() };
+		POINT offset{ 0, 0 };
+		com_ptr<ID2D1DeviceContext> d2dContext{ nullptr };
+		THROW_IF_FAILED(
+			drawingSurfaceInterop->BeginDraw(nullptr, IID_PPV_ARGS(d2dContext.put()), &offset)
+		);
+		d2dContext->Clear();
+		com_ptr<ID2D1Bitmap1> d2dBitmap{ nullptr };
+		THROW_IF_FAILED(
+			d2dContext->CreateBitmap(
+				D2D1::SizeU(texSize, texSize),
+				pixels.data(),
+				texSize * 4,
+				D2D1::BitmapProperties1(
+					D2D1_BITMAP_OPTIONS_NONE,
+					D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED)
+				),
+				d2dBitmap.put()
+			)
+		);
+		d2dContext->DrawBitmap(d2dBitmap.get());
+		THROW_IF_FAILED(drawingSurfaceInterop->EndDraw());
+
+		auto surfaceBrush{ factoryCompositor.CreateSurfaceBrush(surface) };
+		surfaceBrush.Stretch(wuc::CompositionStretch::Fill);
+
+		auto nineGrid{ factoryCompositor.CreateNineGridBrush() };
+		nineGrid.Source(surfaceBrush);
+		nineGrid.SetInsets(half);
+
+		g_featherMaskBrush = nineGrid;
+		return g_featherMaskBrush;
+	}
+
 	void BackdropFactory::Shutdown()
 	{
 		g_backdropActiveBrushMap.clear();
 		g_backdropInactiveBrushMap.clear();
 		g_materialTextureBrush = nullptr;
+		g_featherMaskBrush = nullptr;
 	}
 
 	void BackdropFactory::RefreshConfig()

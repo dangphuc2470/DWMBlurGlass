@@ -71,6 +71,7 @@ namespace MDWMBlurGlassExt
 		void OnBackdropRegionChanged(wil::unique_hrgn& newBackdropRegion);
 		void OnBackdropBrushUpdated();
 		void OnBackdropBrushChanged();
+		void ApplyFinalBrush(wuc::CompositionBrush const& brush);
 		void CancelAnimationCompleteWait();
 
 		POINT GetClientAreaOffset() const;

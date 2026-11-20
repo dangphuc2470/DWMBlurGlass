@@ -1,4 +1,4 @@
-﻿<?xml version="1.0" encoding="UTF-8"?>
+<?xml version="1.0" encoding="UTF-8"?>
 <lang local="vi-VN" author="Reggyxt">
 	<inituifail0>Khởi tạo thư viện MiaoUI thất bại! mã lỗi: </inituifail0>
 	<inituifail1>Tạo bối cảnh cửa sổ thất bại!</inituifail1>
@@ -12,6 +12,7 @@
 	<colorpicker_dlg_alpha>Độ trong suốt:</colorpicker_dlg_alpha>
 	<general>Chung</general>
 	<advanced>Nâng cao</advanced>
+	<apps>Ứng dụng</apps>
 	<symbol>Symbol</symbol>
 	<config>Cấu hình</config>
 	<about>Giới thiệu</about>
