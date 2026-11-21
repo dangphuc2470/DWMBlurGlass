@@ -43,6 +43,21 @@ namespace MDWMBlurGlassExt
 	decltype(CreateRoundRectRgn)* g_funCreateRoundRgn = nullptr;
 	LPTOP_LEVEL_EXCEPTION_FILTER g_oldExceptionFilter = nullptr;
 
+	float g_windowCornerRadius = 0.f;
+	PVOID g_pGetRadiusTarget = nullptr;
+	using GetRadiusFromCornerStyleFn = float(WINAPI*)(CTopLevelWindow*);
+	GetRadiusFromCornerStyleFn g_orgGetRadiusFromCornerStyle = nullptr;
+
+	float WINAPI CTopLevelWindow_GetRadiusFromCornerStyle(CTopLevelWindow* This)
+	{
+		float radius = g_orgGetRadiusFromCornerStyle(This);
+		if (g_windowCornerRadius > 0.f && radius > 4.5f)
+		{
+			return g_windowCornerRadius;
+		}
+		return radius;
+	}
+
 	MinHook g_funHrgnFromRects
 	{
 		"HrgnFromRects", HrgnFromRects
@@ -117,6 +132,22 @@ namespace MDWMBlurGlassExt
 		{
 			g_funHrgnFromRects.Attach();
 		}
+		else
+		{
+			BYTE pat[] = { 0x83, 0xe8, 0x02, 0x74, 0x18, 0x83, 0xe8, 0x01, 0x74, 0x1d, 0x83, 0xf8, 0x01, 0x74, 0x0e };
+			if (PVOID hit = MemSafeSearch("udwm.dll", pat, sizeof(pat)))
+			{
+				PVOID target = reinterpret_cast<PVOID>(reinterpret_cast<ULONG_PTR>(hit) - 17);
+				if (*reinterpret_cast<DWORD*>(target) == 0x38ec8348)
+				{
+					if (MH_CreateHook(target, CTopLevelWindow_GetRadiusFromCornerStyle, reinterpret_cast<PVOID*>(&g_orgGetRadiusFromCornerStyle)) == MH_OK)
+					{
+						if (MH_EnableHook(target) == MH_OK)
+							g_pGetRadiusTarget = target;
+					}
+				}
+			}
+		}
 
 		g_CTopLevelWindow_ValidateVisual_HookDispatcher.enable_hook_routine<4, true>();
 
@@ -145,6 +176,12 @@ namespace MDWMBlurGlassExt
 		if (os::buildNumber < 22000)
 		{
 			g_funHrgnFromRects.Detach();
+		}
+		else if (g_pGetRadiusTarget)
+		{
+			MH_DisableHook(g_pGetRadiusTarget);
+			MH_RemoveHook(g_pGetRadiusTarget);
+			g_pGetRadiusTarget = nullptr;
 		}
 
 		CustomButton::Detach();
@@ -194,6 +231,8 @@ namespace MDWMBlurGlassExt
 		{
 			auto path = Utils::GetCurrentDir() + L"\\data\\config.ini";
 			g_configData = ConfigData::LoadFromFile(path);
+			auto val = Utils::GetIniString(path, L"config", L"windowCornerRadius");
+			g_windowCornerRadius = val.empty() ? 0.f : static_cast<float>(std::clamp(_wtof(val.c_str()), 0.0, 32.0));
 		}
 		DwmAPIEffect::Refresh();
 		CustomBackdrop::Refresh();
